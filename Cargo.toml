@@ -1,0 +1,13 @@
+[package]
+name = "ghostemp"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = "*"
+serde_json = "*"
+
+[target.'cfg(windows)'.dependencies]
+openssl = { version = "0.10.44" }
