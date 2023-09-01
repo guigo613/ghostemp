@@ -6,6 +6,7 @@ use super::{
 };
 use std::{
     iter,
+    slice,
     fs::File,
     ffi::OsStr,
     path::Path,
@@ -20,13 +21,13 @@ pub trait Render {
 }
 
 impl Render for Path {
-    fn render_with(&self, headers: Vec<(String, String)>) -> GenResult<Response> {
+    fn render_with(&self, mut headers: Vec<(String, String)>) -> GenResult<Response> {
         let mut file = File::open(self)?;
         let mut buf = [0; 2048];
         let mut starter = false;
         let file_size = self.metadata()?.len();
         let mime: Mime = if let Some(m) = headers.iter().position(|(x, _)| x.to_lowercase() == "content-type") {
-            headers[m].0.clone().into()
+            headers.remove(m).1.clone().into()
         } else {
             self.extension().and_then(OsStr::to_str).unwrap_or_default().into()
         };
@@ -38,8 +39,7 @@ impl Render for Path {
                     HTTP/1.1 200 Ok\r\n\
                     Content-Length: {file_size}\r\n\
                     Content-Type: {mime}\r\n\
-                    {}\r\n\
-                    \r\n",
+                    {}\r\n",
                     headers.iter().map(|(x, y)| format!("{x}: {y}\r\n")).collect::<Vec<_>>().join("")).as_bytes().to_vec())
             } else {
                 match file.read(&mut buf) {
@@ -54,12 +54,13 @@ impl Render for Path {
 }
 
 impl<R: AsRef<[u8]>> Render for R {
-    fn render_with(&self, headers: Vec<(String, String)>) -> GenResult<Response> {
-        let mut file = self.as_ref().to_vec();
-        let file_size = file.len();
+    fn render_with(&self, mut headers: Vec<(String, String)>) -> GenResult<Response> {
+        let file = self.as_ref();
+        let mut file_size = file.len();
+        let mut file = file.as_ptr() as *mut u8;
         let mut starter = false;
         let mime: Mime = if let Some(m) = headers.iter().position(|(x, _)| x.to_lowercase() == "content-type") {
-            headers[m].0.clone().into()
+            headers.remove(m).1.clone().into()
         } else {
             Mime::Plain
         };
@@ -71,10 +72,15 @@ impl<R: AsRef<[u8]>> Render for R {
                     HTTP/1.1 200 Ok\r\n\
                     Content-Length: {file_size}\r\n\
                     Content-Type: {mime}\r\n\
-                    {}\r\n\
-                    \r\n", headers.iter().map(|(x, y)| format!("{x}: {y}\r\n")).collect::<Vec<_>>().join("")).as_bytes().to_vec())
+                    {}\r\n", headers.iter().map(|(x, y)| format!("{x}: {y}\r\n")).collect::<Vec<_>>().join("")).as_bytes().to_vec())
             } else {
-                Some(file.drain(..2048).collect::<Vec<_>>())
+                if file_size > 0 {
+                    let end_size = file_size.min(2048);
+                    file_size -= end_size;
+                    let slice = unsafe { slice::from_raw_parts_mut(file, end_size) };
+                    file = unsafe { (slice.last_mut().unwrap() as *mut u8).add(1) };
+                    Some(slice.to_vec())
+                } else { None }
             }
         });
 
