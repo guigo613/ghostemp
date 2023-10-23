@@ -16,17 +16,16 @@ use std::{
     io::{
         BufWriter,
         Error,
-        prelude::*
+        prelude::*, BufReader
     },
     ops::Deref,
     collections::HashMap,
-    sync::Arc,
+    sync::Arc, time::Duration,
     // error::Error
 };
 use thread_pool::ThreadPool;
 pub use mime::Mime;
 
-#[cfg(windows)]
 use openssl::ssl::{
     SslMethod,
     SslAcceptor,
@@ -39,7 +38,6 @@ use serde_json::{
 
 const IP: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
 
-#[cfg(windows)]
 static mut ACCEPTOR: Option<SslAcceptor> = None;
 
 const NOT_FOUND: &[u8] = b"HTTP/1.1 404 Not Found\nContent-Length: 9\n\nNot Found";
@@ -97,7 +95,6 @@ impl ClientHTTP {
         Ok(())
     }
     
-    #[cfg(windows)]
     pub fn listen_https(&self, port: u16) -> GenResult<()> {
         let streams = TcpListener::bind(SocketAddrV4::new(IP, port))?;
         let sender = self.pool.clone();
@@ -122,11 +119,11 @@ impl ClientHTTP {
     }
 
     fn treat_request<T: Read + Write>(mut stream: T, urls: Arc<Urls>, socket: Option<SocketAddr>) {
-        let mut buf = Vec::new();
+        let mut buf = [0; 10240];
 
-        let size = stream.read_to_end(&mut buf).unwrap();
+        let size = stream.read(&mut buf).unwrap();
+        
         let req = buf[..size].into();
-
         let page = urls.go(req, socket);
 
         let mut stream = BufWriter::new(stream);
@@ -151,7 +148,7 @@ impl Urls {
         Self { sub_urls: HashMap::new(), local: None, absolute }
     }
 
-    pub fn append<F: Fn(Request, Option<SocketAddr>, Args) -> GenResult<Response> + Send + Sync + 'static>(&mut self, url: &str, func: F) {
+    pub fn append<F: Fn(Request, Option<SocketAddr>, Args) -> GenResult<Response> + Send + Sync + 'static>(&mut self, url: &str, func: F, absolute: bool) {
         let mut path = url.split_terminator("/");
 
         if url.starts_with("/") {
@@ -161,7 +158,7 @@ impl Urls {
         let mut urls = self;
 
         while let Some(p) = path.next() {
-            urls = urls.sub_urls.entry(p.to_owned()).or_insert(Urls::default());
+            urls = urls.sub_urls.entry(p.to_owned()).or_insert(Urls::new(absolute));
         }
 
         urls.add(func);
@@ -172,24 +169,20 @@ impl Urls {
     }
 
     fn go(&self, req: Request, socket: Option<SocketAddr>) -> Response {
-        let mut path = req.url().split_terminator("/").skip(1);
-        let mut args = HashMap::new();
         let mut urls = Some(self);
-
-        while let Some(mut p) = path.next() {
-            let urls_ref = urls.unwrap();
-            if p.contains("?") {
-                let mut splited = p.split("?");
-                let temp = splited.next();
-
-                if let Some(query) = splited.next() {
-                    for (k, v) in query.split("&").map(|x| x.split_at(x.find("=").unwrap_or_default())) {
-                        args.insert(k.to_owned(), v.trim_start_matches("=").to_owned());
-                    }
-                }
-
-                p = temp.unwrap_or(p);
+        let mut args = HashMap::new();
+        let mut url = req.url();
+        
+        if Some((temp, query)) = url.split_once("?") {
+            for (k, v) in query.split("&").map(|x| x.split_at(x.find("=").unwrap_or_default())) {
+                args.insert(k.to_owned(), v.trim_start_matches("=").to_owned());
             }
+
+            url = temp;
+        }
+        
+        for p in url.split_terminator("/").skip(1) {
+            let urls_ref = urls.unwrap();
 
             match urls_ref.sub_urls.get(p) {
                 Some(url) => urls = Some(url),
@@ -344,18 +337,16 @@ fn not_found() -> Box<std::array::IntoIter<Vec<u8>, 1>> {
     Box::new([NOT_FOUND.to_vec()].into_iter())
 }
 
-#[cfg(windows)]
 pub fn get_acceptor() -> &'static mut SslAcceptor {
     unsafe {
         ACCEPTOR.get_or_insert_with(new_acceptor)
     }
 }
 
-#[cfg(windows)]
 pub fn new_acceptor() -> SslAcceptor {
     let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-    acceptor.set_private_key_file(r"C:\conf\privkey1.pem", SslFiletype::PEM).unwrap();
-    acceptor.set_certificate_chain_file(r"C:\conf\fullchain1.pem").unwrap();
+    acceptor.set_private_key_file(r"cert/privkey1.pem", SslFiletype::PEM).unwrap();
+    acceptor.set_certificate_chain_file(r"cert/fullchain1.pem").unwrap();
     acceptor.check_private_key().unwrap();
 
     acceptor.build()
