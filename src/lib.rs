@@ -173,7 +173,7 @@ impl Urls {
         let mut args = HashMap::new();
         let mut url = req.url();
         
-        if Some((temp, query)) = url.split_once("?") {
+        if let Some((temp, query)) = url.split_once("?") {
             for (k, v) in query.split("&").map(|x| x.split_at(x.find("=").unwrap_or_default())) {
                 args.insert(k.to_owned(), v.trim_start_matches("=").to_owned());
             }
