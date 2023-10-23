@@ -8,6 +8,4 @@ edition = "2021"
 [dependencies]
 serde = "*"
 serde_json = "*"
-
-[target.'cfg(windows)'.dependencies]
 openssl = { version = "0.10.44" }
