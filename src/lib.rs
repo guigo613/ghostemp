@@ -75,12 +75,15 @@ impl ClientHTTP {
     }
 
     fn _listen(&self, ip: Ipv4Addr, port: u16) -> GenResult<()> {
-        let streams = TcpListener::bind(SocketAddrV4::new(ip, port))?;
         let sender = self.pool.clone();
         let urls = Arc::clone(&self.urls);
+        
+        let _ = self.pool.execute(move || loop {
+            let streams = TcpListener::bind(SocketAddrV4::new(ip, port))?;
 
-        let _ = self.pool.execute(move || {
-            for stream in streams.incoming().filter_map(Result::ok) {
+            for stream in streams.incoming() {
+                let Ok(stream) = stream else { break };
+
                 let u = Arc::clone(&urls);
                 let socket = stream.peer_addr().ok();
 
@@ -90,20 +93,23 @@ impl ClientHTTP {
                     eprintln!("Error: {err}");
                 }
             }
+
+            Duration::from_secs(1);
         });
 
         Ok(())
     }
     
     pub fn listen_https(&self, port: u16) -> GenResult<()> {
-        let streams = TcpListener::bind(SocketAddrV4::new(IP, port))?;
         let sender = self.pool.clone();
         let urls = Arc::clone(&self.urls);
         let acceptor = get_acceptor();
-
+        
         let _ = self.pool.execute(move || {
+            let streams = TcpListener::bind(SocketAddrV4::new(IP, port))?;
+
             for stream in streams.incoming() {
-                if let Ok((socket, Ok(s))) = stream.map(|s| (s.peer_addr().ok(), acceptor.accept(s))) {
+                if let Ok((socket, Ok(s))) = stream.map(|s| { s.set_read_timeout(Some(Duration::from_secs(5))); (s.peer_addr().ok(), acceptor.accept(s)) }) {
                     let u = Arc::clone(&urls);
 
                     if let Err(err) = sender.execute(move || {
@@ -111,8 +117,10 @@ impl ClientHTTP {
                     }) {
                         eprintln!("Error: {err}");
                     }
-                }
+                } else { break }
             }
+
+            Duration::from_secs(1);
         });
 
         Ok(())
