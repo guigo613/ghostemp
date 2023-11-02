@@ -79,20 +79,20 @@ impl ClientHTTP {
         let urls = Arc::clone(&self.urls);
         
         let _ = self.pool.execute(move || loop {
-            let streams = TcpListener::bind(SocketAddrV4::new(ip, port))?;
-
-            for stream in streams.incoming() {
-                let Ok(stream) = stream else { break };
-
-                let u = Arc::clone(&urls);
-                let socket = stream.peer_addr().ok();
-
-                if let Err(err) = sender.execute(move || {
-                    Self::treat_request(stream, u, socket)
-                }) {
-                    eprintln!("Error: {err}");
+            if let Ok(streams) = TcpListener::bind(SocketAddrV4::new(ip, port)) {
+                for stream in streams.incoming() {
+                    let Ok(stream) = stream else { break };
+    
+                    let u = Arc::clone(&urls);
+                    let socket = stream.peer_addr().ok();
+    
+                    if let Err(err) = sender.execute(move || {
+                        Self::treat_request(stream, u, socket)
+                    }) {
+                        eprintln!("Error: {err}");
+                    }
                 }
-            }
+            };
 
             Duration::from_secs(1);
         });
@@ -106,19 +106,19 @@ impl ClientHTTP {
         let acceptor = get_acceptor();
         
         let _ = self.pool.execute(move || {
-            let streams = TcpListener::bind(SocketAddrV4::new(IP, port))?;
-
-            for stream in streams.incoming() {
-                if let Ok((socket, s)) = stream.map(|s| { s.set_read_timeout(Some(Duration::from_secs(5))); (s.peer_addr().ok(), acceptor.accept(s)) }) {
-                    let Ok(s) = s else { continue };
-                    let u = Arc::clone(&urls);
-
-                    if let Err(err) = sender.execute(move || {
-                        Self::treat_request(s, u, socket)
-                    }) {
-                        eprintln!("Error: {err}");
-                    }
-                } else { break }
+            if let Ok(streams) = TcpListener::bind(SocketAddrV4::new(IP, port)) {
+                for stream in streams.incoming() {
+                    if let Ok((socket, s)) = stream.map(|s| { s.set_read_timeout(Some(Duration::from_secs(5))); (s.peer_addr().ok(), acceptor.accept(s)) }) {
+                        let Ok(s) = s else { continue };
+                        let u = Arc::clone(&urls);
+    
+                        if let Err(err) = sender.execute(move || {
+                            Self::treat_request(s, u, socket)
+                        }) {
+                            eprintln!("Error: {err}");
+                        }
+                    } else { break }
+                }
             }
 
             Duration::from_secs(1);
