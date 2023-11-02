@@ -109,7 +109,8 @@ impl ClientHTTP {
             let streams = TcpListener::bind(SocketAddrV4::new(IP, port))?;
 
             for stream in streams.incoming() {
-                if let Ok((socket, Ok(s))) = stream.map(|s| { s.set_read_timeout(Some(Duration::from_secs(5))); (s.peer_addr().ok(), acceptor.accept(s)) }) {
+                if let Ok((socket, s)) = stream.map(|s| { s.set_read_timeout(Some(Duration::from_secs(5))); (s.peer_addr().ok(), acceptor.accept(s)) }) {
+                    let Ok(s) = s else { continue };
                     let u = Arc::clone(&urls);
 
                     if let Err(err) = sender.execute(move || {
