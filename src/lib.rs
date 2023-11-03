@@ -130,19 +130,19 @@ impl ClientHTTP {
     fn treat_request<T: Read + Write>(mut stream: T, urls: Arc<Urls>, socket: Option<SocketAddr>) {
         let mut buf = [0; 10240];
 
-        let size = stream.read(&mut buf).unwrap();
-        
-        let req = buf[..size].into();
-        let page = urls.go(req, socket);
-
-        let mut stream = BufWriter::new(stream);
-
-        for p in page {
-            if let Err(_) = stream.write(&p) {
-                break;
-            };
+        if let Ok(size) = stream.read(&mut buf) {
+            let req = buf[..size].into();
+            let page = urls.go(req, socket);
+    
+            let mut stream = BufWriter::new(stream);
+    
+            for p in page {
+                if let Err(_) = stream.write(&p) {
+                    break;
+                };
+            }
+            let _ = stream.flush();
         }
-        let _ = stream.flush();
     }
 }
 
